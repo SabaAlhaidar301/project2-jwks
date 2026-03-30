@@ -7,6 +7,7 @@ import threading
 from http.client import HTTPConnection
 from http.server import HTTPServer
 from pathlib import Path
+from unittest import mock
 
 import pytest
 from cryptography.hazmat.primitives import serialization
@@ -257,4 +258,615 @@ def test_auth_endpoint_expired_key():
             print("[CLEANUP] Stopping server...")
             stop_server(server)
     print("[RESULT] ✓ Auth endpoint (expired key) test PASSED")
+    print()
+
+
+def test_http_405_methods():
+    """Test that invalid HTTP methods return 405 Method Not Allowed"""
+    print("\n" + "="*70)
+    print("TEST: HTTP 405 Methods (PUT, PATCH, DELETE, HEAD)")
+    print("="*70)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = os.path.join(tmpdir, "test.db")
+        print(f"[SETUP] Starting HTTP server with database at: {db_path}")
+        server, port = start_server(db_path)
+        print(f"[INFO] Server started on localhost:{port}")
+        try:
+            # Test PUT
+            print(f"[ACTION] Testing PUT method on /.well-known/jwks.json...")
+            conn = HTTPConnection("localhost", port)
+            conn.request("PUT", "/.well-known/jwks.json", body=b"")
+            resp = conn.getresponse()
+            resp.read()  # consume response
+            assert resp.status == 405, f"PUT should return 405, got {resp.status}"
+            print(f"✓ PASS: PUT returns 405")
+            
+            # Test PATCH
+            print(f"[ACTION] Testing PATCH method on /.well-known/jwks.json...")
+            conn = HTTPConnection("localhost", port)
+            conn.request("PATCH", "/.well-known/jwks.json", body=b"")
+            resp = conn.getresponse()
+            resp.read()
+            assert resp.status == 405, f"PATCH should return 405, got {resp.status}"
+            print(f"✓ PASS: PATCH returns 405")
+            
+            # Test DELETE
+            print(f"[ACTION] Testing DELETE method on /.well-known/jwks.json...")
+            conn = HTTPConnection("localhost", port)
+            conn.request("DELETE", "/.well-known/jwks.json")
+            resp = conn.getresponse()
+            resp.read()
+            assert resp.status == 405, f"DELETE should return 405, got {resp.status}"
+            print(f"✓ PASS: DELETE returns 405")
+            
+            # Test HEAD
+            print(f"[ACTION] Testing HEAD method on /.well-known/jwks.json...")
+            conn = HTTPConnection("localhost", port)
+            conn.request("HEAD", "/.well-known/jwks.json")
+            resp = conn.getresponse()
+            resp.read()
+            assert resp.status == 405, f"HEAD should return 405, got {resp.status}"
+            print(f"✓ PASS: HEAD returns 405")
+        finally:
+            print("[CLEANUP] Stopping server...")
+            stop_server(server)
+    print("[RESULT] ✓ HTTP 405 methods test PASSED")
+    print()
+
+
+def test_post_invalid_json():
+    """Test POST /auth with invalid JSON"""
+    print("\n" + "="*70)
+    print("TEST: POST /auth with Invalid JSON")
+    print("="*70)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = os.path.join(tmpdir, "test.db")
+        print(f"[SETUP] Starting HTTP server with database at: {db_path}")
+        server, port = start_server(db_path)
+        print(f"[INFO] Server started on localhost:{port}")
+        try:
+            print(f"[ACTION] Sending POST with malformed JSON...")
+            conn = HTTPConnection("localhost", port)
+            conn.request("POST", "/auth", body=b"invalid json {", headers={"Content-Type": "application/json"})
+            resp = conn.getresponse()
+            body = resp.read().decode("utf-8")
+            print(f"[VERIFY] Response status: {resp.status}")
+            assert resp.status == 400, f"Expected 400, got {resp.status}"
+            print(f"✓ PASS: Invalid JSON returns 400")
+            assert "Invalid JSON" in body
+            print(f"✓ PASS: Response contains error message")
+        finally:
+            print("[CLEANUP] Stopping server...")
+            stop_server(server)
+    print("[RESULT] ✓ Invalid JSON test PASSED")
+    print()
+
+
+def test_post_unauthorized_credentials():
+    """Test POST /auth with invalid credentials"""
+    print("\n" + "="*70)
+    print("TEST: POST /auth with Invalid Credentials")
+    print("="*70)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = os.path.join(tmpdir, "test.db")
+        print(f"[SETUP] Starting HTTP server with database at: {db_path}")
+        server, port = start_server(db_path)
+        print(f"[INFO] Server started on localhost:{port}")
+        try:
+            # Wrong username
+            print(f"[ACTION] Testing wrong username...")
+            conn = HTTPConnection("localhost", port)
+            payload = json.dumps({"username": "wronguser", "password": "password123"})
+            conn.request("POST", "/auth", body=payload, headers={"Content-Type": "application/json"})
+            resp = conn.getresponse()
+            body = resp.read().decode("utf-8")
+            assert resp.status == 401, f"Expected 401, got {resp.status}"
+            print(f"✓ PASS: Wrong username returns 401")
+            
+            # Wrong password
+            print(f"[ACTION] Testing wrong password...")
+            conn = HTTPConnection("localhost", port)
+            payload = json.dumps({"username": "userABC", "password": "wrongpassword"})
+            conn.request("POST", "/auth", body=payload, headers={"Content-Type": "application/json"})
+            resp = conn.getresponse()
+            body = resp.read().decode("utf-8")
+            assert resp.status == 401, f"Expected 401, got {resp.status}"
+            print(f"✓ PASS: Wrong password returns 401")
+        finally:
+            print("[CLEANUP] Stopping server...")
+            stop_server(server)
+    print("[RESULT] ✓ Invalid credentials test PASSED")
+    print()
+
+
+def test_post_wrong_path():
+    """Test POST to wrong endpoint"""
+    print("\n" + "="*70)
+    print("TEST: POST /wrong-path (Invalid Endpoint)")
+    print("="*70)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = os.path.join(tmpdir, "test.db")
+        print(f"[SETUP] Starting HTTP server with database at: {db_path}")
+        server, port = start_server(db_path)
+        print(f"[INFO] Server started on localhost:{port}")
+        try:
+            print(f"[ACTION] Sending POST to /invalid-endpoint...")
+            conn = HTTPConnection("localhost", port)
+            payload = json.dumps({"username": "userABC", "password": "password123"})
+            conn.request("POST", "/invalid-endpoint", body=payload, headers={"Content-Type": "application/json"})
+            resp = conn.getresponse()
+            resp.read()
+            assert resp.status == 405, f"Expected 405 for wrong path, got {resp.status}"
+            print(f"✓ PASS: POST to wrong path returns 405")
+        finally:
+            print("[CLEANUP] Stopping server...")
+            stop_server(server)
+    print("[RESULT] ✓ POST wrong path test PASSED")
+    print()
+
+
+def test_get_wrong_path():
+    """Test GET to wrong endpoint"""
+    print("\n" + "="*70)
+    print("TEST: GET /wrong-path (Invalid Endpoint)")
+    print("="*70)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = os.path.join(tmpdir, "test.db")
+        print(f"[SETUP] Starting HTTP server with database at: {db_path}")
+        server, port = start_server(db_path)
+        print(f"[INFO] Server started on localhost:{port}")
+        try:
+            print(f"[ACTION] Sending GET to /invalid-endpoint...")
+            conn = HTTPConnection("localhost", port)
+            conn.request("GET", "/invalid-endpoint")
+            resp = conn.getresponse()
+            resp.read()
+            assert resp.status == 405, f"Expected 405 for wrong path, got {resp.status}"
+            print(f"✓ PASS: GET to wrong path returns 405")
+        finally:
+            print("[CLEANUP] Stopping server...")
+            stop_server(server)
+    print("[RESULT] ✓ GET wrong path test PASSED")
+    print()
+
+
+def test_base64url_encode_decode():
+    """Test base64url encoding and decoding edge cases"""
+    print("\n" + "="*70)
+    print("TEST: base64url Encode/Decode Edge Cases")
+    print("="*70)
+    
+    # Test encoding
+    print("[ACTION] Testing base64url_encode...")
+    data = b"Hello World!"
+    encoded = main.base64url_encode(data)
+    print(f"✓ Encoded: {encoded}")
+    
+    # Test decoding with no padding needed
+    print("[ACTION] Testing base64url_decode (no padding)...")
+    decoded = main.base64url_decode(encoded)
+    assert decoded == data, f"Expected {data}, got {decoded}"
+    print(f"✓ PASS: Decoded correctly without padding")
+    
+    # Test with various sizes to trigger padding logic
+    test_cases = [
+        b"a",
+        b"ab",
+        b"abc",
+        b"abcd",
+        b"abcde",
+        b"The quick brown fox jumps over the lazy dog",
+    ]
+    
+    for test_data in test_cases:
+        encoded = main.base64url_encode(test_data)
+        decoded = main.base64url_decode(encoded)
+        assert decoded == test_data, f"Failed roundtrip for {test_data}"
+    
+    print(f"✓ PASS: All padding scenarios work correctly")
+    print("[RESULT] ✓ base64url test PASSED")
+    print()
+
+
+def test_jwt_invalid_format():
+    """Test JWT decode with invalid format"""
+    print("\n" + "="*70)
+    print("TEST: JWT Decode Invalid Format")
+    print("="*70)
+    
+    # Test token with wrong number of parts
+    print("[ACTION] Testing JWT with 2 parts instead of 3...")
+    try:
+        main.get_unverified_header("part1.part2")
+        raise AssertionError("Should have raised ValueError")
+    except ValueError as e:
+        print(f"✓ PASS: Raised ValueError: {e}")
+    
+    print("[RESULT] ✓ JWT invalid format test PASSED")
+    print()
+
+
+def test_int_to_base64():
+    """Test int_to_base64 conversion"""
+    print("\n" + "="*70)
+    print("TEST: int_to_base64 Conversion")
+    print("="*70)
+    
+    # Test various integers
+    test_values = [1, 255, 256, 65535, 65536, 2**31 - 1]
+    
+    for val in test_values:
+        encoded = main.int_to_base64(val)
+        print(f"[ACTION] int_to_base64({val}) = {encoded[:20]}...")
+        assert isinstance(encoded, str)
+        assert len(encoded) > 0
+        # Verify it's valid base64 characters
+        assert all(c in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_" for c in encoded)
+    
+    print(f"✓ PASS: All integer conversions successful")
+    print("[RESULT] ✓ int_to_base64 test PASSED")
+    print()
+
+
+def test_private_key_to_jwk():
+    """Test private_key_to_jwk conversion"""
+    print("\n" + "="*70)
+    print("TEST: private_key_to_jwk Conversion")
+    print("="*70)
+    
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.hazmat.backends import default_backend
+    
+    print("[ACTION] Generating test RSA private key...")
+    private_key = rsa.generate_private_key(
+        public_exponent=65537,
+        key_size=2048,
+        backend=default_backend()
+    )
+    
+    print("[ACTION] Serializing private key...")
+    key_pem = main.serialize_private_key(private_key)
+    
+    print("[ACTION] Converting to JWK...")
+    jwk = main.private_key_to_jwk(key_pem, kid=123)
+    
+    assert jwk["kty"] == "RSA"
+    assert jwk["alg"] == "RS256"
+    assert jwk["kid"] == "123"
+    assert "n" in jwk, "JWK should have 'n' (modulus)"
+    assert "e" in jwk, "JWK should have 'e' (exponent)"
+    
+    print(f"✓ PASS: JWK conversion successful")
+    print(f"  - KTY: {jwk['kty']}")
+    print(f"  - ALG: {jwk['alg']}")
+    print(f"  - KID: {jwk['kid']}")
+    print("[RESULT] ✓ private_key_to_jwk test PASSED")
+    print()
+
+
+def test_manual_jwt_encode_decode():
+    """Test manual JWT encode/decode when pyjwt is not available"""
+    print("\n" + "="*70)
+    print("TEST: Manual JWT Encode/Decode (without pyjwt)")
+    print("="*70)
+    
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.hazmat.backends import default_backend
+    
+    # Save original pyjwt state
+    original_pyjwt = main.pyjwt
+    
+    try:
+        # Simulate pyjwt not being available
+        main.pyjwt = None
+        
+        print("[ACTION] Generating RSA key pair...")
+        private_key = rsa.generate_private_key(
+            public_exponent=65537,
+            key_size=2048,
+            backend=default_backend()
+        )
+        
+        payload = {"username": "testuser", "exp": int(time.time()) + 3600}
+        headers = {"kid": "test-kid-123"}
+        
+        print("[ACTION] Testing manual JWT encode (pyjwt=None)...")
+        token = main.jwt_encode(payload, private_key, headers=headers)
+        assert token is not None
+        assert len(token.split('.')) == 3
+        print(f"✓ PASS: Manual JWT encode successful")
+        print(f"  Token: {token[:40]}...")
+        
+        # Verify the header contains our custom kid
+        decoded_header = main.get_unverified_header(token)
+        assert decoded_header.get("kid") == "test-kid-123"
+        print(f"✓ PASS: Custom header preserved: {decoded_header}")
+        
+        print("[ACTION] Testing manual JWT decode (pyjwt=None)...")
+        public_key = private_key.public_key()
+        decoded_payload = main.jwt_decode(token, public_key, verify_exp=True)
+        assert decoded_payload["username"] == "testuser"
+        print(f"✓ PASS: Manual JWT decode successful")
+        print(f"  Decoded payload: {decoded_payload}")
+        
+        # Test decoding without expiration verification
+        print("[ACTION] Decoding without expiration verification...")
+        decoded_no_exp = main.jwt_decode(token, public_key, verify_exp=False)
+        assert decoded_no_exp["username"] == "testuser"
+        print(f"✓ PASS: Decode works with verify_exp=False")
+        
+    finally:
+        # Restore original pyjwt
+        main.pyjwt = original_pyjwt
+    
+    print("[RESULT] ✓ Manual JWT encode/decode test PASSED")
+    print()
+
+
+def test_manual_jwt_decode_expired():
+    """Test manual JWT decode with expired token"""
+    print("\n" + "="*70)
+    print("TEST: Manual JWT Decode - Expired Token")
+    print("="*70)
+    
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.hazmat.backends import default_backend
+    
+    original_pyjwt = main.pyjwt
+    
+    try:
+        main.pyjwt = None
+        
+        print("[ACTION] Generating RSA key pair...")
+        private_key = rsa.generate_private_key(
+            public_exponent=65537,
+            key_size=2048,
+            backend=default_backend()
+        )
+        
+        # Create expired token
+        payload = {"username": "testuser", "exp": int(time.time()) - 3600}  # Expired 1 hour ago
+        
+        print("[ACTION] Encoding expired token...")
+        token = main.jwt_encode(payload, private_key)
+        
+        print("[ACTION] Attempting to decode expired token with verify_exp=True...")
+        public_key = private_key.public_key()
+        
+        try:
+            main.jwt_decode(token, public_key, verify_exp=True)
+            raise AssertionError("Should have raised ExpiredSignatureError")
+        except main.ExpiredSignatureError as e:
+            print(f"✓ PASS: Correctly raised ExpiredSignatureError: {e}")
+        
+        print("[ACTION] Decoding same token with verify_exp=False...")
+        decoded = main.jwt_decode(token, public_key, verify_exp=False)
+        assert decoded["username"] == "testuser"
+        print(f"✓ PASS: Can decode when verify_exp=False")
+        
+    finally:
+        main.pyjwt = original_pyjwt
+    
+    print("[RESULT] ✓ Manual JWT expired decode test PASSED")
+    print()
+
+
+def test_manual_jwt_invalid_signature():
+    """Test manual JWT decode with tampered signature"""
+    print("\n" + "="*70)
+    print("TEST: Manual JWT Decode - Invalid Signature")
+    print("="*70)
+    
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.hazmat.backends import default_backend
+    
+    original_pyjwt = main.pyjwt
+    
+    try:
+        main.pyjwt = None
+        
+        print("[ACTION] Generating two RSA key pairs...")
+        private_key1 = rsa.generate_private_key(
+            public_exponent=65537,
+            key_size=2048,
+            backend=default_backend()
+        )
+        private_key2 = rsa.generate_private_key(
+            public_exponent=65537,
+            key_size=2048,
+            backend=default_backend()
+        )
+        
+        payload = {"username": "testuser", "exp": int(time.time()) + 3600}
+        
+        print("[ACTION] Encoding token with key1...")
+        token = main.jwt_encode(payload, private_key1)
+        
+        print("[ACTION] Attempting to verify with key2 public key (should fail)...")
+        public_key2 = private_key2.public_key()
+        
+        try:
+            main.jwt_decode(token, public_key2, verify_exp=True)
+            raise AssertionError("Should have raised InvalidSignatureError")
+        except main.InvalidSignatureError as e:
+            print(f"✓ PASS: Correctly raised InvalidSignatureError: {e}")
+        
+    finally:
+        main.pyjwt = original_pyjwt
+    
+    print("[RESULT] ✓ Manual JWT invalid signature test PASSED")
+    print()
+
+
+def test_sign_jwt_no_key():
+    """Test sign_jwt when no expired key exists"""
+    print("\n" + "="*70)
+    print("TEST: sign_jwt - No Expired Key Available")
+    print("="*70)
+    
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = os.path.join(tmpdir, "test.db")
+        print(f"[SETUP] Creating database at: {path}")
+        
+        conn = main.init_db(path)
+        try:
+            print("[ACTION] Generate only valid keys (not expired)...")
+            now = int(time.time())
+            cursor = conn.cursor()
+            
+            # Generate only valid keys
+            valid_key = __import__('cryptography.hazmat.primitives.asymmetric.rsa', fromlist=['generate_private_key']).generate_private_key(
+                public_exponent=65537,
+                key_size=2048,
+                backend=__import__('cryptography.hazmat.backends', fromlist=['default_backend']).default_backend()
+            )
+            valid_pem = main.serialize_private_key(valid_key)
+            main.store_key(conn, valid_pem, now + 7200)
+            
+            print("[ACTION] Requesting expired key (should return None)...")
+            result = main.sign_jwt(conn, expired=True)
+            
+            assert result is None, f"Expected None, got {result}"
+            print(f"✓ PASS: sign_jwt returns None when no expired key exists")
+        finally:
+            conn.close()
+    
+    print("[RESULT] ✓ sign_jwt no key test PASSED")
+    print()
+
+
+def test_post_auth_no_key():
+    """Test POST /auth when no appropriate key exists"""
+    print("\n" + "="*70)
+    print("TEST: POST /auth - No Available Key")
+    print("="*70)
+    
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = os.path.join(tmpdir, "test.db")
+        print(f"[SETUP] Creating server with database: {db_path}")
+        
+        # Initialize DB but manually add only valid keys
+        main.DATABASE_FILE = db_path
+        conn = main.init_db(db_path)
+        try:
+            # Bypass generate_and_store_keys and manually add only valid key
+            now = int(time.time())
+            valid_key = __import__('cryptography.hazmat.primitives.asymmetric.rsa', fromlist=['generate_private_key']).generate_private_key(
+                public_exponent=65537,
+                key_size=2048,
+                backend=__import__('cryptography.hazmat.backends', fromlist=['default_backend']).default_backend()
+            )
+            valid_pem = main.serialize_private_key(valid_key)
+            main.store_key(conn, valid_pem, now + 7200)
+        finally:
+            conn.close()
+        
+        server = HTTPServer(("localhost", 0), main.MyServer)
+        port = server.server_address[1]
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        
+        try:
+            print(f"[INFO] Server started on localhost:{port}")
+            print(f"[ACTION] Sending POST /auth?expired=true to trigger 'no key' scenario...")
+            
+            conn = HTTPConnection("localhost", port)
+            payload = json.dumps({"username": "userABC", "password": "password123"})
+            # Request expired key when none exists
+            conn.request("POST", "/auth?expired=true", body=payload, headers={"Content-Type": "application/json"})
+            resp = conn.getresponse()
+            body = resp.read().decode("utf-8")
+            
+            print(f"[VERIFY] Response status: {resp.status}")
+            assert resp.status == 404, f"Expected 404, got {resp.status}"
+            print(f"✓ PASS: Returns 404 when no appropriate key found")
+            assert "Key not found" in body
+            print(f"✓ PASS: Response contains 'Key not found' message")
+            
+        finally:
+            print("[CLEANUP] Stopping server...")
+            server.shutdown()
+            server.server_close()
+    
+    print("[RESULT] ✓ POST auth no key test PASSED")
+    print()
+
+
+def test_generate_and_store_keys_already_exists():
+    """Test generate_and_store_keys when keys already exist"""
+    print("\n" + "="*70)
+    print("TEST: generate_and_store_keys - Keys Already Exist")
+    print("="*70)
+    
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = os.path.join(tmpdir, "test.db")
+        print(f"[SETUP] Creating database and keys...")
+        
+        conn = main.init_db(path)
+        try:
+            print("[ACTION] First call to generate_and_store_keys...")
+            main.generate_and_store_keys(conn)
+            
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM keys")
+            count_before = cursor.fetchone()[0]
+            print(f"[INFO] Keys after first call: {count_before}")
+            
+            print("[ACTION] Second call to generate_and_store_keys (keys should already exist)...")
+            main.generate_and_store_keys(conn)
+            
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM keys")
+            count_after = cursor.fetchone()[0]
+            print(f"[INFO] Keys after second call: {count_after}")
+            
+            assert count_after == count_before, f"Should not generate new keys when they exist"
+            print(f"✓ PASS: No new keys generated when they already exist")
+        finally:
+            conn.close()
+    
+    print("[RESULT] ✓ generate_and_store_keys already exists test PASSED")
+    print()
+
+
+def test_manual_jwt_decode_invalid_format():
+    """Test manual JWT decode with invalid token format"""
+    print("\n" + "="*70)
+    print("TEST: Manual JWT Decode - Invalid Token Format")
+    print("="*70)
+    
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.hazmat.backends import default_backend
+    
+    original_pyjwt = main.pyjwt
+    
+    try:
+        main.pyjwt = None
+        
+        print("[ACTION] Generating RSA key pair...")
+        private_key = rsa.generate_private_key(
+            public_exponent=65537,
+            key_size=2048,
+            backend=default_backend()
+        )
+        public_key = private_key.public_key()
+        
+        print("[ACTION] Attempting to decode token with only 2 parts...")
+        try:
+            main.jwt_decode("part1.part2", public_key, verify_exp=True)
+            raise AssertionError("Should have raised ValueError")
+        except ValueError as e:
+            print(f"✓ PASS: Correctly raised ValueError: {e}")
+        
+        print("[ACTION] Attempting to decode token with 4 parts...")
+        try:
+            main.jwt_decode("part1.part2.part3.part4", public_key, verify_exp=True)
+            raise AssertionError("Should have raised ValueError")
+        except ValueError as e:
+            print(f"✓ PASS: Correctly raised ValueError: {e}")
+        
+    finally:
+        main.pyjwt = original_pyjwt
+    
+    print("[RESULT] ✓ Manual JWT invalid format test PASSED")
     print()
